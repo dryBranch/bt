@@ -1,4 +1,4 @@
-use std::{collections::HashMap};
+use ordered_hash_map::OrderedHashMap as HashMap;
 
 use bytes::{BytesMut, BufMut};
 use crypto::{sha1::Sha1, digest::Digest};
@@ -260,6 +260,8 @@ fn parse_key_pairs(mut input: &[u8]) -> IResult<&[u8], HashMap<String, BObject>>
 
 #[cfg(test)]
 mod tests {
+    use nom::AsBytes;
+
     use super::*;
     
     #[test]
@@ -303,7 +305,7 @@ mod tests {
     fn test_all() {
         let s = std::fs::read("test.torrent").unwrap();
         let (_res, obj) = parse_bobject(&s).unwrap();
-        let (_res, robj) = parse_bobject(&obj.encode()).unwrap();
-        assert!(obj == robj);
+        std::fs::write("dump.torrent", obj.encode()).unwrap();
+        assert!(obj.encode().as_bytes() == s.as_bytes());
     }
 }
