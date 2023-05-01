@@ -1,5 +1,3 @@
-use crypto::sha1::Sha1;
-
 use crate::bencode::BObject;
 
 /// piece 的长度

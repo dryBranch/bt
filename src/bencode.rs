@@ -1,4 +1,4 @@
-use std::{collections::HashMap, io::{Write, self}};
+use std::{collections::HashMap};
 
 use bytes::{BytesMut, BufMut};
 use crypto::{sha1::Sha1, digest::Digest};
@@ -15,7 +15,11 @@ use nom::{
     }
 };
 
-#[derive(Debug, Clone)]
+/// Bencode 对象
+/// 由于 string 中可能存储非 utf-8 的字节，Debug 输出可能会出错
+/// 
+/// 或许增加一个 BinaryChunk 变体比较好
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BObject {
     BSTR(String),
     BINT(i32),
@@ -192,7 +196,8 @@ pub fn parse_bobject(input: &[u8]) -> IResult<&[u8], BObject> {
 fn parse_string(input: &[u8]) -> IResult<&[u8], BObject> {
     let (input, (len, _sp)) = (parse_decimal, tag(b":")).parse(input)?;
     let (input, s) = take(len as usize)(input)?;
-    Ok((input, BObject::BSTR(String::from_utf8_lossy(s).into_owned())))
+    let s = unsafe { String::from_utf8_unchecked(s.to_vec()) };
+    Ok((input, BObject::BSTR(s)))
 }
 
 fn parse_int(input: &[u8]) -> IResult<&[u8], BObject> {
@@ -221,7 +226,7 @@ fn parse_decimal(input: &[u8]) -> IResult<&[u8], isize> {
 /// 依次解析 BObject 序列
 fn parse_seq(mut input: &[u8]) -> IResult<&[u8], Vec<BObject>> {
     let mut list = vec![];
-    while input.len() != 0 {
+    while !input.is_empty() {
         // 可能会解析失败，那么可能是到末尾了或空值则不管他
         let (_input, obj) = match parse_bobject(input) {
             Ok(r) => r,
@@ -236,7 +241,7 @@ fn parse_seq(mut input: &[u8]) -> IResult<&[u8], Vec<BObject>> {
 /// 依次解析 BObject 键值对，String: BObject
 fn parse_key_pairs(mut input: &[u8]) -> IResult<&[u8], HashMap<String, BObject>> {
     let mut map = HashMap::new();
-    while input.len() != 0 {
+    while !input.is_empty() {
         // 可能会解析失败，那么可能是到末尾了或空值则不管他
         let (_input, (key, val)) = match (parse_string, parse_bobject).parse(input) {
             Ok(r) => r,
@@ -298,16 +303,7 @@ mod tests {
     fn test_all() {
         let s = std::fs::read("test.torrent").unwrap();
         let (_res, obj) = parse_bobject(&s).unwrap();
-        std::fs::write("test1.txt", format!("{obj:#?}")).unwrap();
-    }
-
-    fn par(input: &[u8]) -> IResult<&[u8], &[u8]> {
-        tag(b"hello")(input)
-    }
-
-    #[test]
-    fn test_function() {
-        let r = par(b"he");
-        println!("{r:?}");
+        let (_res, robj) = parse_bobject(&obj.encode()).unwrap();
+        assert!(obj == robj);
     }
 }
