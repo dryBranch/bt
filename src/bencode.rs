@@ -16,12 +16,11 @@ use nom::{
 };
 
 /// Bencode 对象
-/// 由于 string 中可能存储非 utf-8 的字节，Debug 输出可能会出错
-/// 
-/// 或许增加一个 BinaryChunk 变体比较好
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BObject {
     BSTR(String),
+    /// 由于 string 中可能存储非 utf-8 的字节，Debug 输出可能会出错
+    BCHUNK(Vec<u8>),
     BINT(i32),
     BLIST(Vec<BObject>),
     BDICT(HashMap<String, BObject>),
@@ -31,6 +30,7 @@ impl BObject {
     pub fn encode(&self) -> BytesMut {
         match self {
             BObject::BSTR(s) => Self::encode_string(s),
+            BObject::BCHUNK(c) => Self::encode_chunk(c),
             BObject::BINT(n) => Self::encode_int(*n),
             BObject::BLIST(list) => Self::encode_list(list),
             BObject::BDICT(dict) => Self::encode_dict(dict),
@@ -44,6 +44,16 @@ impl BObject {
         buf.put_slice(len.as_bytes());
         buf.put_slice(b":");
         buf.put_slice(val.as_bytes());
+        buf
+    }
+
+    pub fn encode_chunk(chunk: &[u8]) -> BytesMut {
+        let mut buf = BytesMut::new();
+        // 字符串长度的 ascii 表示
+        let len = chunk.len().to_string();
+        buf.put_slice(len.as_bytes());
+        buf.put_slice(b":");
+        buf.put_slice(chunk);
         buf
     }
 
@@ -94,6 +104,13 @@ impl BObject {
         }
     }
 
+    pub fn to_chunk(&self) -> Result<Vec<u8>, String> {
+        match self {
+            BObject::BCHUNK(s) => Ok(s.clone()),
+            _ => Err("not a chunk".to_owned()),
+        }
+    }
+
     pub fn to_int(&self) -> Result<i32, String> {
         match self {
             BObject::BINT(s) => Ok(*s),
@@ -134,6 +151,20 @@ impl BObject {
                     .map(|o| match o {
                         BObject::BSTR(n) => Ok(n.clone()),
                         _ => Err(format!("value of {key} is not a string")),
+                    })
+                    .unwrap_or(Err(format!("value of {key} is none")))
+            },
+            _ => Err("BObject is not a dict".to_owned()),
+        }
+    }
+
+    pub fn get_chunk(&self, key: &str) -> Result<Vec<u8>, String> {
+        match self {
+            BObject::BDICT(d) => {
+                d.get(key)
+                    .map(|o| match o {
+                        BObject::BCHUNK(n) => Ok(n.clone()),
+                        _ => Err(format!("value of {key} is not a chunk")),
                     })
                     .unwrap_or(Err(format!("value of {key} is none")))
             },
@@ -196,8 +227,12 @@ pub fn parse_bobject(input: &[u8]) -> IResult<&[u8], BObject> {
 fn parse_string(input: &[u8]) -> IResult<&[u8], BObject> {
     let (input, (len, _sp)) = (parse_decimal, tag(b":")).parse(input)?;
     let (input, s) = take(len as usize)(input)?;
-    let s = unsafe { String::from_utf8_unchecked(s.to_vec()) };
-    Ok((input, BObject::BSTR(s)))
+    let s = if let Ok(s) = String::from_utf8(s.to_vec()) {
+        BObject::BSTR(s)
+    } else {
+        BObject::BCHUNK(s.to_vec())
+    };
+    Ok((input, s))
 }
 
 fn parse_int(input: &[u8]) -> IResult<&[u8], BObject> {
@@ -307,5 +342,6 @@ mod tests {
         let (_res, obj) = parse_bobject(&s).unwrap();
         std::fs::write("dump.torrent", obj.encode()).unwrap();
         assert!(obj.encode().as_bytes() == s.as_bytes());
+        println!("{obj:?}")
     }
 }

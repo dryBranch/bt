@@ -1,3 +1,4 @@
 pub mod bencode;
 pub mod torrent;
-pub mod client;
+pub mod peer;
+pub mod bitfield;
